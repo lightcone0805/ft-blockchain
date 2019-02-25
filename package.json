@@ -1,0 +1,21 @@
+{
+  "name": "foodtracer",
+  "version": "1.0.0",
+  "description": "my competition project,chongchongchong",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "wengod",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "crypto-js": "^3.1.9-1",
+    "express": "^4.16.4",
+    "level": "^4.0.0",
+    "leveldown": "^4.0.1",
+    "levelup": "^4.0.0",
+    "ws": "^6.1.3"
+  }
+}
