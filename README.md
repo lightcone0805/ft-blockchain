@@ -1,2 +1,2 @@
 # ft-blockchain
-A simple realization of blockchain(P2P Based)
+A simple test project of blockchain(P2P Based)
