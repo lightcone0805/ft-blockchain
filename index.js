@@ -10,6 +10,7 @@ var http_port = process.env.HTTP_PORT || 3001;
 var p2p_port = process.env.P2P_PORT || 6001;
 var initialPeers = process.env.PEERS ? process.env.PEERS.split(',') : [];
 var db = level('blockchains-'+ http_port);
+var difficulty = 2;
 
 class Block {
     constructor(index, previousHash, timestamp, data, hash) {
@@ -18,6 +19,12 @@ class Block {
         this.timestamp = timestamp;
         this.data = data;
         this.hash = hash.toString();
+        this.nonce = 0;
+        this.difficulty = difficulty;
+        if (index === 0) {
+            this.difficulty = 0;
+        }
+
     }
 }
 
@@ -83,7 +90,7 @@ var initHttpServer = () => {
         var newBlock = generateNextBlock(req.body.data);
         addBlock(newBlock);
         broadcast(responseLatestMsg());
-        console.log('block added: ' + JSON.stringify(newBlock));
+        console.log('添加区块: ' + JSON.stringify(newBlock));
         res.send();
     });
     app.get('/peers', (req, res) => {
@@ -96,20 +103,19 @@ var initHttpServer = () => {
         connectToPeers([req.body.peer]);
         res.send();
     });
-    app.listen(http_port, () => console.log('Listening http on port: ' + http_port));
+    app.listen(http_port, () => console.log('监听 http 端口: ' + http_port));
 };
 
 
 var initP2PServer = () => {
     var server = new WebSocket.Server({port: p2p_port});
     server.on('connection', ws => initConnection(ws));
-    console.log('listening websocket p2p port on: ' + p2p_port);
+    console.log('监听 websocket p2p 端口: ' + p2p_port);
 
 };
 
 var initConnection = (ws) => {
     sockets.push(ws);
-    console.log("server init le ");
     initMessageHandler(ws);
     initErrorHandler(ws);
     write(ws, queryChainLengthMsg());
@@ -118,7 +124,7 @@ var initConnection = (ws) => {
 var initMessageHandler = (ws) => {
     ws.on('message', (data) => {
         var message = JSON.parse(data);
-        console.log('Received message' + JSON.stringify(message));
+        console.log('收到信息' + JSON.stringify(message));
         switch (message.type) {
             case MessageType.QUERY_LATEST:
                 write(ws, responseLatestMsg());
@@ -135,7 +141,7 @@ var initMessageHandler = (ws) => {
 
 var initErrorHandler = (ws) => {
     var closeConnection = (ws) => {
-        console.log('connection failed to peer: ' + ws.url);
+        console.log('连接节点失败: ' + ws.url);
         sockets.splice(sockets.indexOf(ws), 1);
     };
     ws.on('close', () => closeConnection(ws));
@@ -147,17 +153,24 @@ var generateNextBlock = (blockData) => {
     var previousBlock = getLatestBlock();
     var nextIndex = previousBlock.index + 1;
     var nextTimestamp = new Date().getTime() / 1000;
-    var nextHash = calculateHash(nextIndex, previousBlock.hash, nextTimestamp, blockData);
-    return new Block(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextHash);
+    var nextHash = calculateHash(nextIndex, previousBlock.hash, nextTimestamp, blockData, 0, difficulty);
+
+    var nextBlock = new Block(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextHash);
+    while (nextBlock.hash.substring(0, difficulty) !== Array(difficulty + 1).join("0")) {
+        nextBlock.nonce++;
+        nextBlock.hash = calculateHash(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextBlock.nonce, difficulty);
+    }
+    console.log('找到符合的hash值：', nextBlock.hash);
+    return nextBlock;
 };
 
 
 var calculateHashForBlock = (block) => {
-    return calculateHash(block.index, block.previousHash, block.timestamp, block.data);
+    return calculateHash(block.index, block.previousHash, block.timestamp, block.data, block.nonce, block.difficulty);
 };
 
-var calculateHash = (index, previousHash, timestamp, data) => {
-    return CryptoJS.SHA256(index + previousHash + timestamp + data).toString();
+var calculateHash = (index, previousHash, timestamp, data, nonce, difficulty) => {
+    return CryptoJS.SHA256(index + previousHash + timestamp + data + nonce + difficulty).toString();
 };
 
 var addBlock = (newBlock) => {
@@ -172,14 +185,17 @@ var addBlock = (newBlock) => {
 
 var isValidNewBlock = (newBlock, previousBlock) => {
     if (previousBlock.index + 1 !== newBlock.index) {
-        console.log('invalid index');
+        console.log('index无效');
         return false;
     } else if (previousBlock.hash !== newBlock.previousHash) {
-        console.log('invalid previoushash');
+        console.log('previoushash无效');
         return false;
     } else if (calculateHashForBlock(newBlock) !== newBlock.hash) {
         console.log(typeof (newBlock.hash) + ' ' + typeof calculateHashForBlock(newBlock));
-        console.log('invalid hash: ' + calculateHashForBlock(newBlock) + ' ' + newBlock.hash);
+        console.log('无效hash: ' + calculateHashForBlock(newBlock) + ' ' + newBlock.hash);
+        return false;
+    } else if (newBlock.hash.substring(0, newBlock.difficulty) !== Array(newBlock.difficulty + 1).join("0")) {
+        console.log('hash与difficulty不对应');
         return false;
     }
     //遍历一遍看前面有没有改过
@@ -201,9 +217,9 @@ var handleBlockchainResponse = (message) => {
     var latestBlockReceived = receivedBlocks[receivedBlocks.length - 1];
     var latestBlockHeld = getLatestBlock();
     if (latestBlockReceived.index > latestBlockHeld.index) {
-        console.log('blockchain possibly behind. We got: ' + latestBlockHeld.index + ' Peer got: ' + latestBlockReceived.index);
+        console.log('区块链可能发生改变. 我的: ' + latestBlockHeld.index + ' 节点的: ' + latestBlockReceived.index);
         if (latestBlockHeld.hash === latestBlockReceived.previousHash) {
-            console.log("We can append the received block to our chain");
+            console.log("我们可以把区块添加到链上");
 
             db.put(latestBlockReceived.index,JSON.stringify(latestBlockReceived),function(err){
                 if (err) {return console.log('Ooops!', err);}
@@ -212,20 +228,20 @@ var handleBlockchainResponse = (message) => {
             blockchain.push(latestBlockReceived);
             broadcast(responseLatestMsg());
         } else if (receivedBlocks.length === 1) {
-            console.log("We have to query the chain from our peer");
+            console.log("我需要整条区块链");
             broadcast(queryAllMsg());
         } else {
-            console.log("Received blockchain is longer than current blockchain");
+            console.log("收到的区块链比我的更长");
             replaceChain(receivedBlocks);
         }
     } else {
-        console.log('received blockchain is not longer than current blockchain. Do nothing');
+        console.log('收到区块链比我的更短，不需要更新');
     }
 };
 
 var replaceChain = (newBlocks) => {
     if (isValidChain(newBlocks) && newBlocks.length > blockchain.length) {
-        console.log('Received blockchain is valid. Replacing current blockchain with received blockchain');
+        console.log('收到的区块链经检合法，替换');
         for (var i = 0; i<=blockchain.length-1; i++){
             db.del(i, function(err){
                 if (err) return console.log(err);
@@ -239,7 +255,7 @@ var replaceChain = (newBlocks) => {
         }
         broadcast(responseLatestMsg());
     } else {
-        console.log('Received blockchain invalid');
+        console.log('收到的区块链不合法');
     }
 };
 
