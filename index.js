@@ -6,10 +6,10 @@ var WebSocket = require("ws");
 var level = require('level');
 
 
-var http_port = process.env.HTTP_PORT || 3001;
-var p2p_port = process.env.P2P_PORT || 6001;
+var http_port = process.env.H || 3001;
+var p2p_port = process.env.P || 6001;
 var initialPeers = process.env.PEERS ? process.env.PEERS.split(',') : [];
-var db = level('blockchains-'+ http_port);
+var db = level('blockchains-' + http_port);
 var difficulty = 2;
 
 class Block {
@@ -24,8 +24,86 @@ class Block {
         if (index === 0) {
             this.difficulty = 0;
         }
-
     }
+}
+
+class ProduceModel {
+    constructor(batchId, batchCode, fmId, fmName, pd, ld, qty, fId, fName) {
+        this.batchId = batchId;
+        this.batchCode = batchCode;
+        this.fmId = fmId;
+        this.fmName = fmName;
+        this.pd = pd;
+        this.ld = ld;
+        this.qty = qty;
+        this.fId = fId;
+        this.fName = fName;
+        this.type = 1;
+    }
+
+    isValid() {
+        if (this.batchId && this.batchId && this.fmId && this.fmName && this.pd && this.ld && this.qty && this.fId && this.fName) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+class CheckModel {
+    constructor(batchId, pStandard, department, date) {
+        this.batchId = batchId;
+        this.pStandard = pStandard;
+        this.department = department;
+        this.date = date;
+        this.type = 2;
+    }
+
+    isValid() {
+        if (this.batchId && this.pStandard && this.department && this.date) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+}
+
+class LogisticsModel {
+    constructor(transId, batchId, lat, lng, destination, company, time) {
+        this.transId = transId;
+        this.batchId = batchId;
+        this.lat = lat;
+        this.lng = lng;
+        this.destination = destination;
+        this.company = company;
+        this.time = time;
+        this.type = 3
+    }
+
+    isValid() {
+        if (this.transId && this.batchId && this.lat && this.lng && this.company && this.time) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+
+class ManuPermissionModel {
+    constructor(fmId, fmName, qsCode, qsStartTime, qsEndTime) {
+        this.fmId = fmId;
+        this.fmName = fmName;
+        this.qsCode = qsCode;
+        this.qsStartTime = qsStartTime;
+        this.qsEndTime = qsEndTime;
+        this.type = 4;
+    }
+
+    isValid() {
+        return true;
+    }
+
 }
 
 var sockets = [];
@@ -36,7 +114,8 @@ var MessageType = {
 };
 
 var getGenesisBlock = () => {
-    return new Block(0, "0", 1549871973, "一个创世区块", "816534932c2b7154836da6afc367695e6337db8a921823784c14378abed4f7d7");;
+    return new Block(0, "0", 1549871973, "一个创世区块", "816534932c2b7154836da6afc367695e6337db8a921823784c14378abed4f7d7");
+    ;
 };
 
 var blockchain = [];
@@ -47,7 +126,7 @@ var initBlockChain = () => {
         if (err) {
             //first time to start,init genisis block
             var b = getGenesisBlock();
-            db.put('0',JSON.stringify(b),function (err){
+            db.put('0', JSON.stringify(b), function (err) {
                 if (err) return console.log('Ooops!', err);
                 blockchain.push(b);
                 console.log(JSON.stringify(blockchain));
@@ -76,32 +155,105 @@ var initBlockChain = () => {
 var initHttpServer = () => {
     var app = express();
     app.use(bodyParser.json());
-    app.all('*', function(req, res, next) {
+    app.all('*', function (req, res, next) {
         res.header("Access-Control-Allow-Origin", "*");
-        res.header("Access-Control-Allow-Headers", "X-Requested-With,authorization");
-        res.header("Access-Control-Allow-Methods","PUT,POST,GET,DELETE,OPTIONS");
-        res.header("X-Powered-By",' 3.2.1');
+        res.header("Access-Control-Allow-Headers", "Content-Type,X-Requested-With,authorization");
+        res.header("Access-Control-Allow-Methods", "PUT,POST,GET,DELETE,OPTIONS");
+        res.header("X-Powered-By", ' 3.2.1');
         res.header("Content-Type", "application/json;charset=utf-8");
         next();
     });
 
-    app.get('/blocks', (req, res) => res.send(JSON.stringify(blockchain)));
+    app.post('/getFoodInfo', (req, res) => {
+        var batchId = req.body.data.batchId;
+        var info = [];
+        for (let b of blockchain) {
+            if (b.hasOwnProperty('data') && b.data.hasOwnProperty('batchId') && b.data.batchId == batchId) {
+                info.push(b);
+            }
+        }
+        res.send(JSON.stringify(info));
+    });
+    app.post('/getQsCode', (req, res) => {
+        var manuId = req.body.data.manuId;
+        var info = [];
+        for (let b of blockchain) {
+            if (b.hasOwnProperty('data') && b.data.hasOwnProperty('type') && b.data.type === 4 && b.data.fmId === manuId) {
+                info.push(b);
+            }
+        }
+        res.send(JSON.stringify(info));
+    });
     app.post('/mineBlock', (req, res) => {
-        var newBlock = generateNextBlock(req.body.data);
-        addBlock(newBlock);
-        broadcast(responseLatestMsg());
-        console.log('添加区块: ' + JSON.stringify(newBlock));
-        res.send();
+        if (!req.body.type) {
+            res.send('denied');
+        } else {
+            var type = req.body.type;
+            var data = req.body.data;
+            if (type === 1) {
+                //生产
+                console.log(req.body.data);
+                var model = new ProduceModel(data.batchId, data.batchCode, data.fmId, data.fmName, data.pd, data.ld, data.qty, data.fId, data.fName)
+                if (model.isValid()) {
+                    var newBlock = generateNextBlock(model);
+                } else {
+                    res.send("invalid parameter");
+                }
+            } else if (type === 2) {
+                var model = new CheckModel(data.batchId, data.pStandard, data.department, data.date);
+                if (model.isValid()) {
+                    var newBlock = generateNextBlock(model);
+                } else {
+                    res.send("invalid parameter");
+                }
+                console.log(type);
+            } else if (type === 3) {
+                var model = new LogisticsModel(data.transId, data.batchId, data.lat, data.lng, data.destination, data.company, data.time)
+                //物流
+                if (model.isValid()) {
+                    var newBlock = generateNextBlock(model);
+                } else {
+                    res.send("invalid parameter");
+                }
+                console.log(type);
+            } else if (type === 4) {
+                var model = new ManuPermissionModel(data.fmId, data.fmName, data.qsCode, data.qsStartTime, data.qsEndTime);
+                if (model.isValid()) {
+                    var newBlock = generateNextBlock(model);
+                } else {
+                    res.send("invalid parameter");
+                }
+                console.log(type);
+            }
+        }
+        if (newBlock) {
+            addBlock(newBlock);
+            broadcast(responseLatestMsg());
+            console.log('添加区块: ' + JSON.stringify(newBlock));
+            res.send("success");
+        }
+    });
+    app.post('/tete', (req, res) => {
+        console.log(req.body);
     });
     app.get('/peers', (req, res) => {
         res.send(sockets.map(s => s._socket.remoteAddress + ':' + s._socket.remotePort));
     });
+    app.post('/getBlock', (req, res) => {
+        if (req.body.hash) {
+           for (let b of blockchain) {
+               if (b.hash === req.body.hash) {
+                   res.send(b);
+               }
+           }
+        }
+    });
     app.get('/getLatestHash', (req, res) => {
-        res.send(blockchain[blockchain.length-1]);
+        res.send(blockchain[blockchain.length - 1]);
     });
     app.post('/addPeer', (req, res) => {
         connectToPeers([req.body.peer]);
-        res.send();
+        res.send("success");
     });
     app.listen(http_port, () => console.log('监听 http 端口: ' + http_port));
 };
@@ -152,7 +304,7 @@ var initErrorHandler = (ws) => {
 var generateNextBlock = (blockData) => {
     var previousBlock = getLatestBlock();
     var nextIndex = previousBlock.index + 1;
-    var nextTimestamp = new Date().getTime() / 1000;
+    var nextTimestamp = new Date().getTime();
     var nextHash = calculateHash(nextIndex, previousBlock.hash, nextTimestamp, blockData, 0, difficulty);
 
     var nextBlock = new Block(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextHash);
@@ -175,8 +327,10 @@ var calculateHash = (index, previousHash, timestamp, data, nonce, difficulty) =>
 
 var addBlock = (newBlock) => {
     if (isValidNewBlock(newBlock, getLatestBlock())) {
-        db.put(newBlock.index,JSON.stringify(newBlock),function(err){
-            if (err) {return console.log('Ooops!', err);}
+        db.put(newBlock.index, JSON.stringify(newBlock), function (err) {
+            if (err) {
+                return console.log('Ooops!', err);
+            }
 
         });
         blockchain.push(newBlock);
@@ -221,9 +375,11 @@ var handleBlockchainResponse = (message) => {
         if (latestBlockHeld.hash === latestBlockReceived.previousHash) {
             console.log("我们可以把区块添加到链上");
 
-            db.put(latestBlockReceived.index,JSON.stringify(latestBlockReceived),function(err){
-                if (err) {return console.log('Ooops!', err);}
-
+            db.put(latestBlockReceived.index, JSON.stringify(latestBlockReceived), function (err) {
+                if (err) {
+                    return console.log('Ooops!', err);
+                }
+                q
             });
             blockchain.push(latestBlockReceived);
             broadcast(responseLatestMsg());
@@ -242,14 +398,14 @@ var handleBlockchainResponse = (message) => {
 var replaceChain = (newBlocks) => {
     if (isValidChain(newBlocks) && newBlocks.length > blockchain.length) {
         console.log('收到的区块链经检合法，替换');
-        for (var i = 0; i<=blockchain.length-1; i++){
-            db.del(i, function(err){
+        for (var i = 0; i <= blockchain.length - 1; i++) {
+            db.del(i, function (err) {
                 if (err) return console.log(err);
             });
         }
         blockchain = newBlocks;
-        for (var i = 0; i<=blockchain.length-1; i++){
-            db.put(i, JSON.stringify(blockchain[i]), function(err){
+        for (var i = 0; i <= blockchain.length - 1; i++) {
+            db.put(i, JSON.stringify(blockchain[i]), function (err) {
                 if (err) return console.log(err);
             })
         }
@@ -277,7 +433,7 @@ var isValidChain = (blockchainToValidate) => {
 var getLatestBlock = () => blockchain[blockchain.length - 1];
 var queryChainLengthMsg = () => ({'type': MessageType.QUERY_LATEST});
 var queryAllMsg = () => ({'type': MessageType.QUERY_ALL});
-var responseChainMsg = () =>({
+var responseChainMsg = () => ({
     'type': MessageType.RESPONSE_BLOCKCHAIN, 'data': JSON.stringify(blockchain)
 });
 var responseLatestMsg = () => ({

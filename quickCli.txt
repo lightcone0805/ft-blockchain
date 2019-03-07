@@ -1,6 +1,6 @@
-HTTP_PORT=3001 P2P_PORT=6001 npm start
-HTTP_PORT=3002 P2P_PORT=6002 npm start
-HTTP_PORT=3003 P2P_PORT=6003 npm start
+H=3001 P=6001 npm start
+H=3002 P=6002 npm start
+H=3003 P=6003 npm start
 curl -H "Content-type:application/json" --data '{"data" : "Some data to the first block"}' http://localhost:3001/mineBlock
 
 获取区块链
@@ -14,3 +14,6 @@ curl -H "Content-type:application/json" --data '{"peer" : "ws://localhost:6003"}
 
 查询连接节点
 curl http://localhost:3001/peers
+
+添加生产信息
+curl -H "Content-type:application/json" --data '{"type":1,""data" : "Some data to the first block"}' http://localhost:3001/mineBlock
